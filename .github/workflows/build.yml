@@ -66,6 +66,27 @@ jobs:
           "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "/DVersion=$version" "/DStage=$(cygpath -w "$PWD/dist/aion2-helper")" "/DRoot=$(cygpath -w "$PWD")" \
             "/O$(cygpath -w "$PWD/out")" packaging/windows/aion2-helper.iss
           ls -la out
+      - name: Try to install Npcap (the free edition may refuse a silent install)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          choco install npcap -y --no-progress
+          Test-Path "$env:SystemRoot\System32\Npcap\wpcap.dll"
+      - name: Install it the way a player would
+        shell: pwsh
+        run: |
+          Start-Process -Wait out\AION2Helper-Setup.exe -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/CURRENTUSER","/NORESTART"
+          Get-ChildItem "$env:LOCALAPPDATA\Programs\AION2Helper" | Select-Object Name
+      - name: Smoke test on the Windows desktop (real input, real windows)
+        run: |
+          pip install pillow
+          python tests/windows_smoke.py "$LOCALAPPDATA/Programs/AION2Helper/aion2-helper.exe" out/smoke-screenshot.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-smoke-screenshot
+          path: out/smoke-screenshot.png
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: AION2Helper-Setup-windows
