@@ -166,14 +166,15 @@ def main() -> int:
     released = wait(lambda: not down(VK_F9) and not down(VK_LBUTTON), 2, 0.02)
     check("letting go releases F9 and left mouse", released, f"F9={down(VK_F9)} left={down(VK_LBUTTON)}")
 
-    key(VK_SUBTRACT)
+    key(VK_SUBTRACT)                 # an instant tap, shorter than the 10 ms poll
     key(VK_SUBTRACT, up=True)
-    check("numpad minus pauses the macro", wait(lambda: not api(port, token, "/api/state")["macro_status"]["enabled"], 2))
+    check("numpad minus pauses the macro (even a very quick tap)", wait(lambda: not api(port, token, "/api/state")["macro_status"]["enabled"], 2))
     mouse(0x0008)
     time.sleep(0.4)
     check("while paused, nothing is pressed", not down(VK_F9) and not down(VK_LBUTTON))
     mouse(0x0010)
     key(VK_SUBTRACT)
+    time.sleep(0.06)  # a normal key press
     key(VK_SUBTRACT, up=True)
     check("numpad minus resumes it", wait(lambda: api(port, token, "/api/state")["macro_status"]["enabled"], 2))
 

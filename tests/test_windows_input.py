@@ -9,6 +9,7 @@ class FakeWin32:
     def __init__(self):
         self.sent = []
         self.down = set()
+        self.tapped = set()
 
     def scan_code(self, vk):
         return vk + 1000  # recognisable
@@ -21,6 +22,11 @@ class FakeWin32:
 
     def is_down(self, vk):
         return vk in self.down
+
+    def key_state(self, vk):
+        tapped = vk in self.tapped
+        self.tapped.discard(vk)
+        return vk in self.down, tapped
 
 
 class TestWinOutput(unittest.TestCase):
@@ -70,6 +76,17 @@ class TestWinWatcher(unittest.TestCase):
         w.poll_once()
         self.assertEqual(sorted(seen), sorted([("BTN_RIGHT", True), ("BTN_RIGHT", False), ("KEY_KPMINUS", True)]))
         self.assertTrue(w.is_down("KEY_KPMINUS"))
+
+    def test_tap_between_polls_is_not_missed(self):
+        api = FakeWin32()
+        seen = []
+        w = WinWatcher(lambda n, d: seen.append((n, d)), api=api)
+        w.set_keys({"KEY_KPMINUS"})
+        w.poll_once()
+        api.tapped.add(VK["KEY_KPMINUS"][0])   # pressed and let go before the next poll
+        w.poll_once()
+        w.poll_once()
+        self.assertEqual(seen, [("KEY_KPMINUS", True), ("KEY_KPMINUS", False)])
 
 
 class TestKeyTable(unittest.TestCase):

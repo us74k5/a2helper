@@ -83,6 +83,11 @@ class Win32:
     def is_down(self, vk: int) -> bool:
         return bool(self._state(vk) & 0x8000)
 
+    def key_state(self, vk: int) -> tuple[bool, bool]:
+        """(down now, pressed since the last call). The second catches a tap shorter than the poll."""
+        s = self._state(vk)
+        return bool(s & 0x8000), bool(s & 0x0001)
+
 
 class WinOutput:
     def __init__(self, keys: list[str], api=None):
@@ -162,12 +167,24 @@ class WinWatcher:
         with self._lock:
             keys = dict(self._keys)
         for name, vk in keys.items():
-            down = api.is_down(vk)
+            down, tapped = api.key_state(vk)
             with self._lock:
-                if name not in self._state or self._state[name] == down:
+                if name not in self._state:
                     continue
+                was = self._state[name]
+                if was == down:
+                    # down and up again between two polls: a press we would otherwise miss
+                    missed = tapped and not down
+                    if not missed:
+                        continue
+                else:
+                    missed = False
                 self._state[name] = down
-            self.on_key(name, down)
+            if missed:
+                self.on_key(name, True)
+                self.on_key(name, False)
+            else:
+                self.on_key(name, down)
 
     def _run(self) -> None:
         if self._api is None:
