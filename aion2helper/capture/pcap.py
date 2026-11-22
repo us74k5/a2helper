@@ -51,7 +51,7 @@ def load_library():
         npcap = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "Npcap")
         if not os.path.isfile(os.path.join(npcap, "wpcap.dll")):
             raise PcapError(f"Npcap is not installed. Install it from {NPCAP_URL} (keep the default "
-                            "options), then press Start overlay again.")
+                            "options), then press \"try again\" on the page.")
         _dll_dirs.append(os.add_dll_directory(npcap))
         try:
             return ctypes.CDLL(os.path.join(npcap, "wpcap.dll"))
