@@ -1,0 +1,113 @@
+name: Build
+
+# Builds the two downloads for clan members:
+#   - Windows: AION2Helper-Setup.exe (an installer; no administrator rights needed)
+#   - Linux:   aion2-helper-linux.tar.gz (extract, run ./install.sh)
+# Run by hand (Actions tab -> Build -> Run workflow), or push a tag like v3.0.0 to also
+# attach both files to a GitHub release.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  test-linux:
+    name: Tests (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: System libraries (libpcap for the capture tests, what Qt needs offscreen)
+        run: sudo apt-get update && sudo apt-get install -y libpcap0.8 libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+      - run: pip install -r requirements.txt
+      - name: Unit tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -t . -v
+
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt
+      - name: Unit tests on Windows
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -t . -v
+      - name: Build the program
+        working-directory: packaging
+        run: |
+          # Build PyInstaller's launcher stub from source: the prebuilt one is byte-for-byte the same in
+          # thousands of programs, some of them malware, so antivirus products flag anything carrying it.
+          pip install --no-binary pyinstaller pyinstaller || pip install pyinstaller
+          python -m PyInstaller --noconfirm --distpath "$PWD/../dist" --workpath "$PWD/../build" aion2-helper.spec
+      - name: Check the packaged program starts
+        run: |
+          dist/aion2-helper/aion2-helper.exe version
+          test -f dist/aion2-helper/_internal/web/index.html
+      - name: Installer
+        env:
+          MSYS_NO_PATHCONV: "1"        # Git Bash must not rewrite ISCC's /D and /O switches into paths
+          MSYS2_ARG_CONV_EXCL: "*"
+        run: |
+          version=$(python -c "import aion2helper; print(aion2helper.__version__)")
+          choco install innosetup --no-progress -y
+          mkdir -p out
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "/DVersion=$version" "/DStage=$(cygpath -w "$PWD/dist/aion2-helper")" "/DRoot=$(cygpath -w "$PWD")" \
+            "/O$(cygpath -w "$PWD/out")" packaging/windows/aion2-helper.iss
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AION2Helper-Setup-windows
+          path: out/AION2Helper-Setup.exe
+          if-no-files-found: error
+
+  linux:
+    name: Linux download
+    needs: test-linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bundle
+        run: |
+          root=aion2-helper
+          mkdir -p "$root" out
+          cp -r aion2helper install.sh requirements.txt README.md LICENSE THIRD-PARTY-NOTICES.md licenses "$root/"
+          find "$root" -name '__pycache__' -prune -exec rm -rf {} +
+          chmod +x "$root/install.sh"
+          tar czf out/aion2-helper-linux.tar.gz "$root"
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aion2-helper-linux
+          path: out/aion2-helper-linux.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Attach to the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: files
+          merge-multiple: true
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" files/* --repo "$GITHUB_REPOSITORY" --title "AION 2 Helper $GITHUB_REF_NAME" \
+            --notes "Windows: run AION2Helper-Setup.exe (and install Npcap for the cube overlay). Linux: extract and run ./install.sh."
