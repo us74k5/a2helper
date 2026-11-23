@@ -132,6 +132,8 @@ def main() -> int:
 
     st = wait(lambda: (s := api(port, token, "/api/state"))["parser"]["present"] and s, 60)
     check("cube parser downloaded on first start", st and st["parser"]["present"])
+    # the capture restarts once the parser is in; wait for it to settle
+    wait(lambda: not api(port, token, "/api/state")["overlay"]["status"].startswith("Starting"), 15)
     st = api(port, token, "/api/state")
     o = st["overlay"]
     print("overlay status:", o["status"], "| capturing:", o["capturing"], flush=True)
