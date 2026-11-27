@@ -82,29 +82,41 @@ class EvdevWatcher:
         self._devices: dict[str, object] = {}
         self._pressed: dict[tuple[str, int], bool] = {}
         self._lock = threading.Lock()
+        self._skipped: dict[str, tuple] = {}    # path -> stat signature of a device not worth watching
+        self._gen = 0                           # bumped when the watched keys change
         self._stop = threading.Event()
+        self._rescan = threading.Event()
         self._thread: threading.Thread | None = None
+        self._scanner: threading.Thread | None = None
         self.problem = ""
 
     def set_keys(self, names) -> None:
         with self._lock:
             self._keys = {CODES[n]: n for n in names if n}
+            self._gen += 1
             for d in list(self._devices.values()):
                 d.close()
             self._devices.clear()
             self._pressed.clear()
-        self._next_scan = 0.0
+            self._skipped.clear()
+        self._rescan.set()
 
     def start(self) -> None:
         self._stop.clear()
-        self._next_scan = 0.0
+        self._rescan.set()
+        # Looking for new devices runs on its own thread: opening every /dev/input device takes
+        # hundreds of milliseconds on some machines, and a trigger release must never wait for that.
+        self._scanner = threading.Thread(target=self._scan_loop, name="key-scan", daemon=True)
+        self._scanner.start()
         self._thread = threading.Thread(target=self._run, name="key-watcher", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
         self._stop.set()
-        if self._thread:
-            self._thread.join(timeout=2)
+        self._rescan.set()
+        for t in (self._thread, self._scanner):
+            if t:
+                t.join(timeout=2)
         with self._lock:
             for d in self._devices.values():
                 d.close()
@@ -118,11 +130,14 @@ class EvdevWatcher:
         with self._lock:
             want = set(self._keys)
             known = set(self._devices)
-        found = 0
+            gen = self._gen
         denied = 0
         for path in list_devices():
             if path in known:
                 continue
+            sig = _signature(path)
+            if sig is not None and self._skipped.get(path) == sig:
+                continue                # same device as last time, and it had none of our keys
             try:
                 d = InputDevice(path)
             except PermissionError:
@@ -132,10 +147,15 @@ class EvdevWatcher:
                 continue
             if any(s in d.name.lower() for s in OWN_DEVICE_NAMES) or not (d.keys & want):
                 d.close()
+                if sig is not None:
+                    self._skipped[path] = sig
                 continue
             with self._lock:
+                if gen != self._gen:    # the keys changed while we were looking; start over
+                    d.close()
+                    self._rescan.set()
+                    return
                 self._devices[path] = d
-            found += 1
             log.info("watching %s", d.name)
         with self._lock:
             have = len(self._devices)
@@ -162,14 +182,19 @@ class EvdevWatcher:
             except OSError:
                 pass
 
+    def _scan_loop(self) -> None:
+        while not self._stop.is_set():
+            self._rescan.wait(RESCAN_S)
+            self._rescan.clear()
+            if self._stop.is_set():
+                break
+            try:
+                self._scan()
+            except Exception as e:  # never let the watcher die
+                self.problem = f"input scan failed: {e}"
+
     def _run(self) -> None:
         while not self._stop.is_set():
-            if time.monotonic() >= self._next_scan:
-                try:
-                    self._scan()
-                except Exception as e:  # never let the watcher die
-                    self.problem = f"input scan failed: {e}"
-                self._next_scan = time.monotonic() + RESCAN_S
             with self._lock:
                 fds = {d.fd: (p, d) for p, d in self._devices.items()}
             if not fds:
@@ -178,7 +203,7 @@ class EvdevWatcher:
             try:
                 ready, _, _ = select.select(list(fds), [], [], 0.25)
             except (OSError, ValueError):
-                self._next_scan = 0.0
+                self._rescan.set()
                 continue
             for fd in ready:
                 path, dev = fds[fd]
@@ -198,6 +223,15 @@ class EvdevWatcher:
                     with self._lock:
                         self._pressed[(path, code)] = bool(value)
                     self.on_key(name, bool(value))
+
+
+def _signature(path: str):
+    """Identifies the device behind a path, so a replugged device is looked at again."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_rdev, st.st_ino, st.st_ctime_ns)
 
 
 def input_permission_problem() -> str:

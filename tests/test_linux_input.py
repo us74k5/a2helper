@@ -175,6 +175,56 @@ class TestWatcher(unittest.TestCase):
         for d in devs.values():
             d.close()
 
+    def test_a_slow_device_scan_never_delays_the_trigger(self):
+        # Opening every /dev/input device can take hundreds of milliseconds; a release that
+        # arrives meanwhile must still get through at once (it used to wait for the scan).
+        from aion2helper import input_linux as IL
+        mouse = PipeDevice("/dev/input/event1", "Logitech Mouse", [0x110, 0x111])
+        slow_paths = [f"/dev/input/event{i}" for i in range(2, 6)]
+        opened = []
+
+        def open_device(p):
+            if p == mouse.path:
+                return mouse
+            opened.append(p)
+            time.sleep(0.3)
+            return PipeDevice(p, "Headphone jack", [])
+
+        seen = []
+        got = threading.Event()
+
+        def on_key(n, d):
+            seen.append((time.monotonic(), d))
+            got.set()
+
+        with mock.patch.object(IL, "list_devices", lambda: [mouse.path] + slow_paths), \
+             mock.patch.object(IL, "InputDevice", open_device), \
+             mock.patch.object(IL, "_signature", lambda p: ("same", p)):
+            w = IL.EvdevWatcher(on_key)
+            w.set_keys({"BTN_RIGHT"})
+            w.start()
+            deadline = time.monotonic() + 5
+            while len(opened) < len(slow_paths) and time.monotonic() < deadline:
+                time.sleep(0.02)
+            time.sleep(0.4)                     # the first scan has looked at every device
+            first = len(opened)
+            opened.clear()
+            w._rescan.set()                     # a rescan skips devices it already turned down
+            time.sleep(0.1)
+            self.assertEqual(opened, [])
+            # now make a rescan slow again and release the trigger in the middle of it
+            with mock.patch.object(IL, "_signature", lambda p: ("new", p)):
+                w._rescan.set()
+                time.sleep(0.05)
+                t = time.monotonic()
+                mouse.send((E.EV_KEY, 0x111, 0))
+                got.wait(1)
+            w.stop()
+        self.assertEqual(first, len(slow_paths))
+        self.assertTrue(seen, "the release never arrived")
+        self.assertLess(seen[0][0] - t, 0.1)
+        mouse.close()
+
 
 if __name__ == "__main__":
     unittest.main()
