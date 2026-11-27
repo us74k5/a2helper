@@ -17,7 +17,9 @@ you just walk the raw position freezes. Between readings the tracker estimates
 your own movement (dead reckoning): while your client is sending movement packets
 (``note_movement``), ``estimate`` moves along your facing at your walking speed,
 which is learned from how far real readings say you went. Every real reading
-snaps the estimate back onto it. ``pos`` stays the last real reading.
+snaps the estimate back onto it. ``pos`` stays the last real reading. Packets also
+flow while you fight in place, so when the readings show you stayed put the estimate
+stops until a reading shows you moving again.
 
 No Qt here, so it can be tested on its own.
 """
@@ -42,6 +44,8 @@ MIN_WALK_CMPS = 300.0       # learned speed stays within these
 MAX_WALK_CMPS = 1200.0
 MOVING_S = 0.35             # a movement packet this recently means you're still moving
 MAX_ESTIMATE_CM = 30000.0   # never estimate more than 300 m past the last real reading
+ESTIMATE_DOUBT = 0.4        # an estimate can be off by this share of how far it went (turns)
+STILL_CMPS = 150.0          # readings say you went slower than this while "moving": you weren't
 
 
 class PositionTracker:
@@ -62,6 +66,10 @@ class PositionTracker:
         self._adv_time = 0.0        # estimate integrated up to this time
         self._moved_s = 0.0         # seconds spent moving since the last real reading
         self._est_cm = 0.0          # distance estimated since the last real reading
+        # Your client also sends packets while you fight in place, so packets alone don't prove
+        # you're walking. When the readings show you stayed put anyway, stop estimating until a
+        # reading shows you moving again.
+        self._walking = True
 
     # -- public
     def note_movement(self):
@@ -79,7 +87,7 @@ class PositionTracker:
         if self.pos is None or moving <= 0.0:
             return False
         self._moved_s += moving
-        if self.heading is None or self._est_cm >= MAX_ESTIMATE_CM:
+        if self.heading is None or not self._walking or self._est_cm >= MAX_ESTIMATE_CM:
             return False
         step = min(self.speed * moving, MAX_ESTIMATE_CM - self._est_cm)
         self._est_cm += step
@@ -100,13 +108,16 @@ class PositionTracker:
         if raw == self.pos:
             self.pos_time = now
             return False
-        # Silence while standing still says you can't be far; silence while walking
-        # (no skills used) means you may have gone a long way, so widen the gate by it.
+        # A reading is yours if it is near enough the last one, or near enough where the
+        # estimate says you have walked to. The gate is never widened just because packets
+        # kept coming: in a fight they always do, and other entities nearby would get in.
         # Measured from the last new reading: the capture repeats a frozen position in
         # every snapshot, and those repeats say nothing about how far you've walked.
-        dt = min(GAP_CAP_S + self._moved_s, max(0.05, now - self._changed))
+        dt = min(GAP_CAP_S, max(0.05, now - self._changed))
         gate = MAX_SPEED_CMPS * dt + GATE_SLACK_CM
-        if _dist2d(raw, self.pos) <= gate:
+        near_est = self._est_cm > 0 and \
+            _dist2d(raw, self.estimate) <= gate + ESTIMATE_DOUBT * self._est_cm
+        if _dist2d(raw, self.pos) <= gate or near_est:
             self._cands.clear()
             self._accept(raw, now)
             return True
@@ -127,6 +138,7 @@ class PositionTracker:
         return False
 
     def _reset(self, raw, now):
+        self._walking = True
         self.pos, self.pos_time, self._changed = raw, now, now
         self.heading = None
         self._path.clear()
@@ -141,9 +153,14 @@ class PositionTracker:
 
     def _learn_speed(self, raw):
         # how fast you really went while the movement packets said you were walking
-        if self._moved_s < 1.0:
+        if self._moved_s < 0.5:
+            if _dist2d(raw, self.pos) >= HEADING_MIN_CM:
+                self._walking = True        # a reading moved you on: you are walking
             return
         seen = _dist2d(raw, self.pos) / self._moved_s
+        self._walking = seen >= STILL_CMPS
+        if self._moved_s < 1.0:
+            return
         if MIN_WALK_CMPS * 0.5 <= seen <= MAX_WALK_CMPS * 1.5:
             self.speed = min(MAX_WALK_CMPS, max(MIN_WALK_CMPS, 0.5 * self.speed + 0.5 * seen))
 
