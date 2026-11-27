@@ -47,7 +47,8 @@ DEFAULTS: dict = {
         "alert_sound": True,
         "radar": {"visible": True, "x": None, "y": 80, "size": 240, "range_m": 150.0},
         # mode "heading": points relative to the way you're moving; "north": relative to map-up.
-        "arrow": {"visible": True, "x": None, "y": 90, "size": 220, "mode": "heading"},
+        # visible switches the arrow on; it pops up only while a cube is within range_m.
+        "arrow": {"visible": True, "x": None, "y": 90, "size": 220, "mode": "heading", "range_m": 150.0},
         "map": {
             "mode": "fixed",               # fixed: map stays put | follow: map is centered on you
             "m": [0.0, 0.02, -0.02, 0.0],  # 2x2 world(cm) -> screen(px), row-major
@@ -116,7 +117,12 @@ def _read_json(path: Path) -> dict:
 def _old_cube_config() -> dict:
     base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
     old = _read_json(base / "aion-cube-overlay" / "config.json")
-    return {k: old[k] for k in ("char", "elevate", "alert_sound", "radar", "arrow", "map") if k in old}
+    out = {k: old[k] for k in ("char", "elevate", "alert_sound", "radar", "arrow", "map") if k in old}
+    if isinstance(out.get("arrow"), dict):
+        # The old overlay's arrow was always on screen, so people switched it off; this one
+        # only pops up near a cube. Start it switched on, keeping its place, size and mode.
+        out["arrow"] = {k: v for k, v in out["arrow"].items() if k != "visible"}
+    return out
 
 
 def _old_helper_config() -> dict:

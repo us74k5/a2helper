@@ -92,7 +92,8 @@ class TestSettings(unittest.TestCase):
         base = Path(self.tmp.name)
         (base / "aion-cube-overlay").mkdir()
         (base / "aion-cube-overlay" / "config.json").write_text(json.dumps(
-            {"char": "Nyx", "map": {"mode": "follow", "points": [[1, 2, 3, 4]]}, "cc": {"visible": True}}))
+            {"char": "Nyx", "map": {"mode": "follow", "points": [[1, 2, 3, 4]]}, "cc": {"visible": True},
+             "arrow": {"visible": False, "size": 180, "mode": "north"}}))
         (base / "combat-helper").mkdir()
         (base / "combat-helper" / "settings.json").write_text(json.dumps(
             {"general": {"trigger": "BTN_SIDE"}, "class": "ranger",
@@ -103,6 +104,9 @@ class TestSettings(unittest.TestCase):
                          ("BTN_SIDE", "KEY_F8", "tap", 0.8))
         self.assertEqual((o["char"], o["map"]["mode"], o["map"]["points"]), ("Nyx", "follow", [[1, 2, 3, 4]]))
         self.assertNotIn("cc", o)
+        # the old always-on arrow's "off" isn't carried over: the new one only pops up near a cube
+        self.assertEqual((o["arrow"]["visible"], o["arrow"]["size"], o["arrow"]["mode"], o["arrow"]["range_m"]),
+                         (True, 180, "north", 150.0))
         self.assertEqual(len(st.notes), 2)
 
     def test_broken_file_falls_back(self):

@@ -263,6 +263,7 @@ function renderLive() {
   pill("sFacing", "facing: " + (o.facing_known ? "known" : "move to learn it"));
   for (const [id, on, label] of [["bRadar", o.radar_visible, "Radar"], ["bArrow", o.arrow_visible, "Arrow"], ["bMap", o.map_visible, "Map layer"]]) {
     $(id).textContent = label + (on ? ": shown" : ": hidden"); $(id).className = on ? "on" : ""; $(id).disabled = !o.enabled; }
+  $("bArrow").textContent = o.arrow_visible ? "Arrow: on (pops up within " + Math.round(o.arrow_range_m) + " m)" : "Arrow: off";
   $("bArrowMode").textContent = "Arrow follows: " + (o.arrow_mode === "heading" ? "your movement" : "map-up"); $("bArrowMode").disabled = !o.enabled;
   $("bCal").textContent = o.calibrating ? "Save calibration" : "Calibrate now"; $("bCal").disabled = !o.enabled;
   $("calInfo").textContent = (o.calibration_points ? o.calibration_points + " point(s) saved, " : "not calibrated yet, ") + o.map_mode + " mode";

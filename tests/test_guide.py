@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-from aion2helper.overlay import Model, guide_direction, turn_hint  # noqa: E402
+from aion2helper.overlay import Model, arrow_wanted, guide_direction, turn_hint  # noqa: E402
 from aion2helper.settings import DEFAULTS  # noqa: E402
 DEFAULT_CONFIG = DEFAULTS["overlay"]
 
@@ -60,6 +60,40 @@ class Direction(unittest.TestCase):
             m.on_snapshot({"player": [x, 40000, 0], "cubes": []})
         self.assertIsNone(m.heading)
         self.assertGreater(m.player[0], 800000)
+
+
+
+class ArrowPopUp(unittest.TestCase):
+    """The arrow only appears while a cube is within its range."""
+
+    def model(self, player, cubes):
+        m = Model()
+        m.player = player
+        m.cubes = cubes
+        return m
+
+    def test_hidden_without_position_or_cubes(self):
+        cfg = {"visible": True, "range_m": 150.0}
+        self.assertFalse(arrow_wanted(self.model(None, [cube(100, 0)]), cfg))
+        self.assertFalse(arrow_wanted(self.model(P, []), cfg))
+
+    def test_pops_up_only_in_range(self):
+        cfg = {"visible": True, "range_m": 150.0}
+        self.assertTrue(arrow_wanted(self.model(P, [cube(14_000, 0)]), cfg))       # 140 m
+        self.assertTrue(arrow_wanted(self.model(P, [cube(15_000, 0)]), cfg))       # exactly 150 m
+        self.assertFalse(arrow_wanted(self.model(P, [cube(16_000, 0)]), cfg))      # 160 m
+        self.assertFalse(arrow_wanted(self.model(P, [cube(12_000, 0, 10_000)]), cfg))  # 156 m, mostly up
+
+    def test_nearest_cube_decides(self):
+        cfg = {"visible": True, "range_m": 150.0}
+        self.assertTrue(arrow_wanted(self.model(P, [cube(90_000, 0), cube(0, 5_000)]), cfg))
+
+    def test_switched_off_never_shows(self):
+        self.assertFalse(arrow_wanted(self.model(P, [cube(100, 0)]), {"visible": False, "range_m": 150.0}))
+
+    def test_default_range(self):
+        self.assertEqual(DEFAULT_CONFIG["arrow"]["range_m"], 150.0)
+        self.assertTrue(arrow_wanted(self.model(P, [cube(14_000, 0)]), {"visible": True}))
 
 
 if __name__ == "__main__":

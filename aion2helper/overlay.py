@@ -252,6 +252,21 @@ class Model(QObject):
         px, py, pz = self.player
         return min(self.cubes, key=lambda c: (c[2] - px) ** 2 + (c[3] - py) ** 2 + (c[4] - pz) ** 2)
 
+    def nearest_dist_m(self):
+        """Straight-line distance to the nearest cube in meters, or None."""
+        near = self.nearest()
+        if near is None:
+            return None
+        return math.dist(self.player, near[2:5]) / UNITS_PER_M
+
+
+def arrow_wanted(model, arrow_cfg) -> bool:
+    """The arrow pops up only while a cube is within its range (when switched on)."""
+    if not arrow_cfg.get("visible", True):
+        return False
+    dist = model.nearest_dist_m()
+    return dist is not None and dist <= float(arrow_cfg.get("range_m", 150.0))
+
 
 def describe(cube, player):
     dx, dy, dz = ((cube[2] - player[0]) / UNITS_PER_M, (cube[3] - player[1]) / UNITS_PER_M,
@@ -880,7 +895,7 @@ class OverlayController:
             self.model.on_status("The cube parser is not downloaded yet (use Download on the page)", True)
             return
         self.radar.setVisible(bool(self.cfg["radar"].get("visible", True)))
-        self.guide.setVisible(bool(self.cfg["arrow"].get("visible", True)))
+        self._sync_arrow()
         if not self.feed.running:
             self.model.on_status("Starting capture…", False)
             self.feed.start(self.cfg.get("char", ""), self.cfg.get("elevate", "pkexec"))
@@ -911,8 +926,15 @@ class OverlayController:
         except Exception as e:  # a bad command must not take the app down
             log.error("overlay command %r failed: %s", cmd, e)
 
+    def _sync_arrow(self) -> None:
+        """Show the arrow while a cube is in range, hide it otherwise."""
+        want = bool(self.cfg.get("enabled", True)) and arrow_wanted(self.model, self.cfg["arrow"])
+        if want != self.guide.isVisible():
+            self.guide.setVisible(want)
+
     def _on_snapshot(self, msg: dict) -> None:
         self.model.on_snapshot(msg)
+        self._sync_arrow()
         fresh = self.model.new_cube_ids()
         if fresh and self.cfg.get("alert_sound", True) and self.model.player:
             play_alert()
@@ -967,13 +989,20 @@ class OverlayController:
             self.save()
             self.map.update()
             return "calibration points cleared"
-        if cmd in ("radar", "arrow"):
-            win = self.radar if cmd == "radar" else self.guide
-            vis = not win.isVisible()
-            win.setVisible(vis)
-            self.cfg[cmd]["visible"] = vis
+        if cmd == "radar":
+            vis = not self.radar.isVisible()
+            self.radar.setVisible(vis)
+            self.cfg["radar"]["visible"] = vis
             self.save()
-            return f"{cmd} {'shown' if vis else 'hidden'}"
+            return f"radar {'shown' if vis else 'hidden'}"
+        if cmd == "arrow":
+            # The setting arms the arrow; it pops up only while a cube is in range.
+            on = not self.cfg["arrow"].get("visible", True)
+            self.cfg["arrow"]["visible"] = on
+            self.save()
+            self._sync_arrow()
+            rng = float(self.cfg["arrow"].get("range_m", 150.0))
+            return f"arrow on (pops up within {rng:.0f} m of a cube)" if on else "arrow off"
         if cmd == "arrow-mode":
             mode = "north" if self.cfg["arrow"].get("mode", "heading") == "heading" else "heading"
             self.cfg["arrow"]["mode"] = mode
@@ -994,4 +1023,6 @@ class OverlayController:
                 "calibration_points": len(self.cfg["map"]["points"]), "map_mode": self.cfg["map"]["mode"],
                 "radar_visible": bool(self.cfg["radar"].get("visible", True)),
                 "arrow_visible": bool(self.cfg["arrow"].get("visible", True)),
+                "arrow_showing": self.guide.isVisible(),
+                "arrow_range_m": float(self.cfg["arrow"].get("range_m", 150.0)),
                 "arrow_mode": self.cfg["arrow"].get("mode", "heading")}

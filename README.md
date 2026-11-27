@@ -65,8 +65,10 @@ It starts with the program (switch it off on the page if you don't want it). Set
 **borderless windowed**. The game only sends your position when you use a skill or dash, so do
 that once after logging in.
 
-- **Arrow:** points at the nearest cube relative to the way you're moving, with the distance and
-  how far up or down it is. Move a couple of meters and it lines up with your view.
+- **Arrow:** pops up when a cube is within 150 m and hides again when none is. It points at the
+  nearest cube relative to the way you're moving, with the distance and how far up or down it is.
+  Move a couple of meters and it lines up with your view. The Arrow button switches the pop-up on
+  or off; change the distance with `"range_m"` under `"arrow"` in the settings file.
 - **Radar:** north up, with distances and a line to the nearest cube.
 - **Map layer:** cube markers over the in-game map, once you've calibrated it.
 
