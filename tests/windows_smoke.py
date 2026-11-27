@@ -147,7 +147,10 @@ def main() -> int:
 
     wins = wait(lambda: [w for w in windows_of(proc.pid) if w["rect"][2] < 600], 10)
     print("windows:", windows_of(proc.pid), flush=True)
-    check("radar and arrow windows shown", len(wins) >= 2, len(wins))
+    # the arrow only pops up while a cube is in range, and there are none here
+    ov = api(port, token, "/api/state")["overlay"]
+    check("radar shown, arrow waiting for a cube", len(wins) >= 1 and ov["arrow_visible"] and not ov["arrow_showing"],
+          f"{len(wins)} window(s), arrow on={ov['arrow_visible']} showing={ov['arrow_showing']}")
     check("overlay windows stay on top", wins and all(w["topmost"] for w in wins))
     check("overlay windows let clicks through", wins and all(w["clickthrough"] for w in wins))
 
