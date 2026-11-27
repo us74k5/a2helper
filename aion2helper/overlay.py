@@ -217,6 +217,7 @@ class Model(QObject):
         # PositionTracker drops (0,0,0) and other entities' readings and smooths facing.
         self.tracker = PositionTracker()
         self.raw_player = None
+        self._moves = None      # the capture's count of your client's movement packets
 
     @property
     def heading(self):
@@ -227,9 +228,14 @@ class Model(QObject):
         return self.tracker.heading_time
 
     def on_snapshot(self, msg):
+        moves = msg.get("mv")
+        if moves is not None:
+            if self._moves is not None and moves != self._moves:
+                self.tracker.note_movement()
+            self._moves = moves
         self.raw_player = tuple(msg["player"]) if msg.get("player") else None
         self.tracker.update(self.raw_player)
-        self.player = self.tracker.pos
+        self.player = self.tracker.estimate
         self.cubes = msg.get("cubes") or []
         self.packets = msg.get("pkts", self.packets)
         self.last_snapshot = time.monotonic()
@@ -239,6 +245,14 @@ class Model(QObject):
         self.status = text
         self.status_error = is_error
         self.changed.emit()
+
+    def advance(self) -> bool:
+        """Carry your estimated position forward between readings (call often)."""
+        if not self.tracker.advance():
+            return False
+        self.player = self.tracker.estimate
+        self.changed.emit()
+        return True
 
     def new_cube_ids(self):
         ids = {c[0] for c in self.cubes}
@@ -882,6 +896,10 @@ class OverlayController:
         self.tick = QTimer()
         self.tick.timeout.connect(self._tick)  # keep "waiting" text fresh without new packets
         self.tick.start(500)
+        # your own movement between position readings, so the arrow and radar stay smooth
+        self.motion = QTimer()
+        self.motion.timeout.connect(self._advance)
+        self.motion.start(50)
 
     # -- life cycle
     def start(self) -> None:
@@ -942,6 +960,10 @@ class OverlayController:
     def _on_status(self, text: str, is_error: bool) -> None:
         self.model.on_status(text, is_error)
         (log.warning if is_error else log.info)("capture: %s", text)
+
+    def _advance(self) -> None:
+        if self.model.advance():
+            self._sync_arrow()
 
     def _tick(self) -> None:
         self.radar.update()

@@ -4,7 +4,8 @@ This file is also installed root-owned next to the Linux capture helper, which i
 after it has dropped root. It never sends or changes any traffic.
 
 Snapshots are dicts:
-  {"t":"snap","player":[x,y,z] | None,"cubes":[[eid,npc_id,x,y,z,name],...],"pkts":n}
+  {"t":"snap","player":[x,y,z] | None,"cubes":[[eid,npc_id,x,y,z,name],...],"pkts":n,"mv":n}
+  ("mv": how many movement packets your client has sent; the overlay estimates walking from it)
   {"t":"info","msg":"..."}   {"t":"error","msg":"..."}
 """
 
@@ -157,7 +158,10 @@ class Session:
             pos = self.state.player_pos
             cubes = [[c.entity_id, c.npc_id, round(c.x, 1), round(c.y, 1), round(c.z, 1), c.name]
                      for c in self.state.cubes.values()]
+            moves = getattr(self.state, "c2s_step_count", None)
         payload = {"t": "snap", "player": [round(v, 1) for v in pos] if pos else None, "cubes": cubes}
+        if moves is not None:
+            payload["mv"] = moves   # your client's movement packets: the overlay estimates walking from them
         key = json.dumps(payload, sort_keys=True)
         if key != self.last_key or force:
             payload["pkts"] = self.pkts
