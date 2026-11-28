@@ -12,15 +12,6 @@ Both used to drive the arrow directly. This tracker keeps one track:
   * facing is the direction over the last few metres of accepted path, not the
     last single step, and it is smoothed so one wobble can't flip it.
 
-The game only sends your position with skills, dashes and zone changes, so while
-you just walk the raw position freezes. Between readings the tracker estimates
-your own movement (dead reckoning): while your client is sending movement packets
-(``note_movement``), ``estimate`` moves along your facing at your walking speed,
-which is learned from how far real readings say you went. Every real reading
-snaps the estimate back onto it. ``pos`` stays the last real reading. Packets also
-flow while you fight in place, so when the readings show you stayed put the estimate
-stops until a reading shows you moving again.
-
 No Qt here, so it can be tested on its own.
 """
 from __future__ import annotations
@@ -39,68 +30,25 @@ STALE_S = 8.0               # no accepted reading for this long: trust candidate
 HEADING_MIN_CM = 200.0      # need this much straight-line travel before facing updates
 HEADING_WINDOW_CM = 600.0   # facing looks back along about this much path
 HEADING_SMOOTH = 0.5        # 0..1, share of each new facing estimate that is taken
-WALK_SPEED_CMPS = 650.0     # starting guess for walking speed (the parser's own figure)
-MIN_WALK_CMPS = 300.0       # learned speed stays within these
-MAX_WALK_CMPS = 1200.0
-MOVING_S = 0.35             # a movement packet this recently means you're still moving
-MAX_ESTIMATE_CM = 30000.0   # never estimate more than 300 m past the last real reading
-ESTIMATE_DOUBT = 0.4        # an estimate can be off by this share of how far it went (turns)
-STILL_CMPS = 150.0          # readings say you went slower than this while "moving": you weren't
 
 
 class PositionTracker:
     def __init__(self, clock=time.monotonic):
         self.clock = clock
         self.pos = None             # accepted position (x, y, z), cm
-        self.pos_time = 0.0         # last time a reading agreed with pos (repeats count)
-        self._changed = 0.0         # last time pos actually moved to a new reading
+        self.pos_time = 0.0
         self.heading = None         # unit (dx, dy)
         self.heading_time = 0.0
         self.rejected = 0           # how many readings were dropped (for status)
         self._path = deque()        # recent accepted points, for facing
         self._cands = []
-        # dead reckoning
-        self.estimate = None        # best guess of where you are now (x, y, z), cm
-        self.speed = WALK_SPEED_CMPS
-        self._last_move = -1e9      # when the last movement packet was seen
-        self._adv_time = 0.0        # estimate integrated up to this time
-        self._moved_s = 0.0         # seconds spent moving since the last real reading
-        self._est_cm = 0.0          # distance estimated since the last real reading
-        # Your client also sends packets while you fight in place, so packets alone don't prove
-        # you're walking. When the readings show you stayed put anyway, stop estimating until a
-        # reading shows you moving again.
-        self._walking = True
 
     # -- public
-    def note_movement(self):
-        """Your client sent a movement packet: you are moving right now."""
-        now = self.clock()
-        self.advance(now)
-        self._last_move = now
-
-    def advance(self, now=None):
-        """Move the estimate forward to now. Returns True if it moved."""
-        now = self.clock() if now is None else now
-        start, self._adv_time = self._adv_time, now
-        # only the part of [start, now] during which movement packets were still coming
-        moving = max(0.0, min(now, self._last_move + MOVING_S) - max(start, self._last_move))
-        if self.pos is None or moving <= 0.0:
-            return False
-        self._moved_s += moving
-        if self.heading is None or not self._walking or self._est_cm >= MAX_ESTIMATE_CM:
-            return False
-        step = min(self.speed * moving, MAX_ESTIMATE_CM - self._est_cm)
-        self._est_cm += step
-        ex, ey, ez = self.estimate
-        self.estimate = (ex + self.heading[0] * step, ey + self.heading[1] * step, ez)
-        return True
-
     def update(self, raw):
         """Feed one raw reading (or None). Returns True if the tracked position changed."""
         if raw is None or (abs(raw[0]) < NULL_CM and abs(raw[1]) < NULL_CM):
             return False
         now = self.clock()
-        self.advance(now)
         raw = tuple(float(v) for v in raw)
         if self.pos is None:
             self._reset(raw, now)
@@ -108,16 +56,9 @@ class PositionTracker:
         if raw == self.pos:
             self.pos_time = now
             return False
-        # A reading is yours if it is near enough the last one, or near enough where the
-        # estimate says you have walked to. The gate is never widened just because packets
-        # kept coming: in a fight they always do, and other entities nearby would get in.
-        # Measured from the last new reading: the capture repeats a frozen position in
-        # every snapshot, and those repeats say nothing about how far you've walked.
-        dt = min(GAP_CAP_S, max(0.05, now - self._changed))
+        dt = min(GAP_CAP_S, max(0.05, now - self.pos_time))
         gate = MAX_SPEED_CMPS * dt + GATE_SLACK_CM
-        near_est = self._est_cm > 0 and \
-            _dist2d(raw, self.estimate) <= gate + ESTIMATE_DOUBT * self._est_cm
-        if _dist2d(raw, self.pos) <= gate or near_est:
+        if _dist2d(raw, self.pos) <= gate:
             self._cands.clear()
             self._accept(raw, now)
             return True
@@ -138,36 +79,14 @@ class PositionTracker:
         return False
 
     def _reset(self, raw, now):
-        self._walking = True
-        self.pos, self.pos_time, self._changed = raw, now, now
+        self.pos, self.pos_time = raw, now
         self.heading = None
         self._path.clear()
         self._path.append(raw)
         self._cands.clear()
-        self._snap_estimate(raw)
-
-    def _snap_estimate(self, raw):
-        self.estimate = raw
-        self._moved_s = 0.0
-        self._est_cm = 0.0
-
-    def _learn_speed(self, raw):
-        # how fast you really went while the movement packets said you were walking
-        if self._moved_s < 0.5:
-            if _dist2d(raw, self.pos) >= HEADING_MIN_CM:
-                self._walking = True        # a reading moved you on: you are walking
-            return
-        seen = _dist2d(raw, self.pos) / self._moved_s
-        self._walking = seen >= STILL_CMPS
-        if self._moved_s < 1.0:
-            return
-        if MIN_WALK_CMPS * 0.5 <= seen <= MAX_WALK_CMPS * 1.5:
-            self.speed = min(MAX_WALK_CMPS, max(MIN_WALK_CMPS, 0.5 * self.speed + 0.5 * seen))
 
     def _accept(self, raw, now):
-        self._learn_speed(raw)
-        self._snap_estimate(raw)
-        self.pos, self.pos_time, self._changed = raw, now, now
+        self.pos, self.pos_time = raw, now
         self._path.append(raw)
         # keep about HEADING_WINDOW_CM of path behind the newest point
         total = 0.0
