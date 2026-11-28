@@ -1,0 +1,313 @@
+<!doctype html>
+<!-- aion2-helper page -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AION 2 Helper</title>
+<style>
+  :root{--bg:#14161a;--panel:#1d2026;--line:#2d323b;--text:#e6e8ec;--dim:#98a0ad;--accent:#6aa9ff;--ok:#4cc38a;--warn:#e5a64a;--bad:#ef6a6a}
+  @media (prefers-color-scheme: light){:root{--bg:#f4f5f7;--panel:#fff;--line:#d9dde3;--text:#1c2027;--dim:#5d6676;--accent:#1f6feb;--ok:#168a55;--warn:#b26b00;--bad:#c93232}}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,sans-serif}
+  header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{font-size:16px;margin:0 8px 0 0} header .ver{color:var(--dim);font-size:12px}
+  .grow{flex:1}
+  main{max-width:900px;margin:0 auto;padding:16px}
+  label.l{color:var(--dim);font-size:12px;display:block;margin-bottom:3px}
+  input[type=text],select{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit}
+  button{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 12px;font:inherit;cursor:pointer}
+  button:hover{border-color:var(--accent)} button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.danger{border-color:var(--bad);color:var(--bad)} button:disabled{opacity:.45;cursor:default}
+  button.on{border-color:var(--ok);color:var(--ok)}
+  button.key{min-width:120px;font-family:ui-monospace,monospace;font-size:12px}
+  button.key.capturing{border-color:var(--warn);color:var(--warn)}
+  .pill{padding:3px 10px;border-radius:99px;border:1px solid var(--line);font-size:12px;color:var(--dim);white-space:nowrap}
+  .pill.ok{color:var(--ok);border-color:var(--ok)} .pill.bad{color:var(--bad);border-color:var(--bad)} .pill.warn{color:var(--warn);border-color:var(--warn)}
+  .note{color:var(--dim);font-size:12px} .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+  .card h2{font-size:15px;margin:0} .card h3{font-size:13px;margin:16px 0 8px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .seg button{border:0;border-radius:0;border-right:1px solid var(--line)} .seg button:last-child{border-right:0}
+  .seg button.sel{background:var(--accent);color:#fff}
+  input[type=range]{width:100%;accent-color:var(--accent)} .slider{margin-bottom:12px} .slider .top{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+  .slider .val{font-variant-numeric:tabular-nums;font-weight:600}
+  .banner{border-radius:8px;padding:10px 12px;margin-bottom:12px;border:1px solid var(--warn);background:var(--panel)}
+  .banner.bad{border-color:var(--bad)} .banner a{color:var(--accent)}
+  .stat{font-variant-numeric:tabular-nums}
+  pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;height:260px;overflow:auto;margin:8px 0 0;font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap}
+  details summary{cursor:pointer;color:var(--dim)}
+  kbd{font:12px ui-monospace,monospace;border:1px solid var(--line);border-radius:4px;padding:0 4px}
+  #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);padding:8px 14px;border-radius:8px;background:var(--panel);border:1px solid var(--line);display:none;max-width:90vw;z-index:9}
+  #toast.err{border-color:var(--bad);color:var(--bad)}
+</style>
+</head>
+<body>
+<header>
+  <h1>AION 2 Helper</h1><span class="ver" id="ver"></span>
+  <div class="grow"></div>
+  <span id="pMacro" class="pill">macro: …</span>
+  <span id="pOverlay" class="pill">overlay: …</span>
+  <button id="quit" title="Stops the macro and the overlay and closes the program">Quit</button>
+</header>
+<main>
+  <div id="banners"></div>
+
+  <section class="card">
+    <div class="head"><h2>Macro</h2><div class="grow"></div>
+      <span id="macroState" class="note"></span>
+      <button id="mStart" class="primary">Start</button>
+      <button id="mTest" title="Shows in the log what it would press, and presses nothing">Test run</button>
+      <button id="mStop">Stop</button>
+    </div>
+    <p class="note">Put your whole skill chain in the game's own macro. While you hold the trigger, this holds the macro key and your basic attack for you, so the macro cancels its swing on every hit. It is the same for every class.</p>
+    <div class="grid">
+      <div><label class="l">Hold to play</label><span id="kTrigger"></span><div class="note">Unbind it in the game.</div></div>
+      <div><label class="l">Game macro key</label><span id="kMacro"></span></div>
+      <div><label class="l">Basic attack</label><span id="kAttack"></span></div>
+      <div><label class="l">Switch on/off while running</label><span id="kToggle"></span></div>
+    </div>
+    <h3>Basic attack</h3>
+    <div class="row" style="margin-bottom:8px">
+      <div class="seg" id="attackMode">
+        <button data-mode="hold">Hold it down</button><button data-mode="tap">Tap on an interval</button><button data-mode="off">Leave it alone</button>
+      </div>
+    </div>
+    <p class="note" id="attackNote"></p>
+    <div id="sliders"></div>
+  </section>
+
+  <section class="card">
+    <div class="head"><h2>Cube overlay</h2><div class="grow"></div>
+      <span id="ovState" class="note"></span>
+      <button id="ovToggle"></button>
+    </div>
+    <p class="note">A radar, a 3D arrow and a map layer that show hidden cubes. Set the game to <b>borderless windowed</b><span class="linux-only"> and use Desktop Mode, not Game Mode</span>. The game only sends your position when you use a skill or dash.</p>
+    <div class="row" style="margin:6px 0 2px">
+      <span class="pill stat" id="sPos">position: –</span><span class="pill stat" id="sCubes">cubes: –</span><span class="pill stat" id="sPk">packets: –</span><span class="pill stat" id="sFacing">facing: –</span>
+    </div>
+    <h3>Show</h3>
+    <div class="row">
+      <button id="bRadar">Radar</button><button id="bArrow">Arrow</button><button id="bMap">Map layer</button>
+      <button id="bArrowMode" title="Point the arrow relative to the way you move, or to map-up"></button>
+    </div>
+    <h3>Hotkeys</h3>
+    <p class="note">These work while you play. The game still sees the key, so pick keys you don't use in game. × clears one.</p>
+    <div class="grid">
+      <div><label class="l">Map layer on/off</label><span class="row" id="hMap"></span></div>
+      <div><label class="l">Calibrate the map</label><span class="row" id="hCalibrate"></span></div>
+      <div><label class="l">Radar on/off</label><span class="row" id="hRadar"></span></div>
+      <div><label class="l">Arrow on/off</label><span class="row" id="hArrow"></span></div>
+    </div>
+    <h3>Map calibration</h3>
+    <div class="row"><button id="bCal">Calibrate now</button><button id="bCalReset" class="danger">Clear calibration points</button><span class="note" id="calInfo"></span></div>
+    <details style="margin-top:8px"><summary>How to calibrate (once)</summary>
+      <ol class="note">
+        <li>Open the in-game map at the zoom you normally use, then press your <b>calibrate</b> hotkey.</li>
+        <li>Left-click the tip of your character's arrow on the map. Press <kbd>Enter</kbd> to save and go back to the game.</li>
+        <li>Fly at least 50 m (diagonally if you can), reopen the map, press the hotkey again, click your arrow again, <kbd>Enter</kbd>.</li>
+      </ol>
+      <p class="note">After two clicks the markers line up; a third click from somewhere else also corrects a rotated map. If your map stays centred on you, the overlay switches to follow mode by itself: scroll the wheel until a cube marker sits on its cube. While calibrating: right-drag or arrow keys move the layer, wheel scales (Shift = fine), <kbd>R</kbd> rotates 90°, <kbd>F</kbd> mirrors, <kbd>M</kbd> switches fixed/follow, <kbd>Backspace</kbd> clears the clicks. Calibration matches one map zoom level.</p>
+    </details>
+    <h3>More</h3>
+    <div class="grid">
+      <div><label class="l">Character name (optional)</label><div class="row"><input type="text" id="char" maxlength="40" placeholder="helps in crowded areas" style="flex:1;min-width:0"><button id="charSave">Save</button></div></div>
+      <div><label class="l">Sound when a new cube appears</label><label class="row" style="color:var(--text)"><input type="checkbox" id="sound"> play a sound</label></div>
+      <div><label class="l">Cube parser (Aion2CubeGPS)</label><div class="row"><button id="parser">Update parser</button></div><div class="note" id="parserNote"></div></div>
+    </div>
+  </section>
+
+  <details class="card"><summary>Log</summary><pre id="log"></pre>
+    <p class="note" id="paths"></p></details>
+  <p class="note">Tools that read the game's traffic or press keys for you break AION 2's rules on third-party programs, and players have reported bans for them. Use this at your own risk.</p>
+</main>
+<div id="toast"></div>
+<script>
+const TOKEN = "__TOKEN__";
+let S = null, capturing = null, dragging = false;
+const $ = (id) => document.getElementById(id);
+const el = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v; else if (k.startsWith("on")) e[k] = v;
+    else if (v === true) e.setAttribute(k, ""); else if (v !== false && v != null) e.setAttribute(k, v);
+  }
+  for (const c of kids.flat()) e.append(c instanceof Node ? c : document.createTextNode(c));
+  return e;
+};
+function toast(msg, err) {
+  const t = $("toast"); t.textContent = msg; t.className = err ? "err" : ""; t.style.display = "block";
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.style.display = "none", err ? 6000 : 2200);
+}
+async function api(path, body) {
+  const opt = body === undefined ? {} : {method: "POST", body: JSON.stringify(body)};
+  const r = await fetch(path, {...opt, headers: {"X-Token": TOKEN, "Content-Type": "application/json"}});
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const run = async (fn, ok) => { try { const r = await fn(); if (ok) toast(ok); await refresh(true); return r; } catch (e) { toast(e.message, true); } };
+const save = (section, values) => run(() => api("/api/settings", {section, values}), "saved");
+const overlayCmd = (cmd) => run(() => api("/api/overlay", {cmd}));
+
+// ── keys ────────────────────────────────────────────────────────────────────
+const CODE = {Space:"KEY_SPACE",Tab:"KEY_TAB",Backquote:"KEY_GRAVE",Minus:"KEY_MINUS",Equal:"KEY_EQUAL",
+  BracketLeft:"KEY_LEFTBRACE",BracketRight:"KEY_RIGHTBRACE",Semicolon:"KEY_SEMICOLON",Quote:"KEY_APOSTROPHE",
+  Comma:"KEY_COMMA",Period:"KEY_DOT",Slash:"KEY_SLASH",Backslash:"KEY_BACKSLASH",ShiftLeft:"KEY_LEFTSHIFT",
+  ShiftRight:"KEY_RIGHTSHIFT",ControlLeft:"KEY_LEFTCTRL",ControlRight:"KEY_RIGHTCTRL",AltLeft:"KEY_LEFTALT",
+  AltRight:"KEY_RIGHTALT",Insert:"KEY_INSERT",Delete:"KEY_DELETE",Home:"KEY_HOME",End:"KEY_END",PageUp:"KEY_PAGEUP",
+  PageDown:"KEY_PAGEDOWN",ScrollLock:"KEY_SCROLLLOCK",Pause:"KEY_PAUSE",ArrowUp:"KEY_UP",ArrowDown:"KEY_DOWN",
+  ArrowLeft:"KEY_LEFT",ArrowRight:"KEY_RIGHT",NumpadSubtract:"KEY_KPMINUS",NumpadAdd:"KEY_KPPLUS",
+  NumpadMultiply:"KEY_KPASTERISK",NumpadDivide:"KEY_KPSLASH",NumpadEnter:"KEY_KPENTER",NumpadDecimal:"KEY_KPDOT",
+  Enter:"KEY_ENTER",Backspace:"KEY_BACKSPACE",CapsLock:"KEY_CAPSLOCK"};
+function evdevFromKey(e) {
+  const c = e.code; if (CODE[c]) return CODE[c];
+  let m;
+  if ((m = c.match(/^Digit(\d)$/))) return "KEY_" + m[1];
+  if ((m = c.match(/^Key([A-Z])$/))) return "KEY_" + m[1];
+  if ((m = c.match(/^F(\d{1,2})$/))) return "KEY_F" + m[1];
+  if ((m = c.match(/^Numpad(\d)$/))) return "KEY_KP" + m[1];
+  return null;
+}
+const MOUSE = ["BTN_LEFT", "BTN_MIDDLE", "BTN_RIGHT", "BTN_SIDE", "BTN_EXTRA"];
+const prettyKey = (k) => !k ? "not set" : k.replace(/^KEY_KP/, "Num ").replace(/^KEY_/, "").replace(/^BTN_/, "Mouse ").toLowerCase()
+  .replace(/^./, (c) => c.toUpperCase());
+
+function keyButton(value, onPick) {
+  const b = el("button", {class: "key", title: "Click, then press the key or mouse button (Esc cancels)"}, prettyKey(value));
+  b.onclick = (ev) => {
+    ev.stopPropagation();
+    if (capturing) capturing.stop();
+    b.textContent = "press a key…"; b.classList.add("capturing");
+    const stop = () => { document.removeEventListener("keydown", onKey, true); document.removeEventListener("mousedown", onMouse, true);
+      document.removeEventListener("contextmenu", noMenu, true);
+      b.classList.remove("capturing"); b.textContent = prettyKey(value); capturing = null; };
+    const pick = (k) => { stop(); if (k && k !== value) onPick(k); };
+    const onKey = (e) => { e.preventDefault(); e.stopPropagation(); if (e.key === "Escape") return pick(null);
+      const k = evdevFromKey(e); if (k) pick(k); else toast("that key is not supported", true); };
+    const onMouse = (e) => { e.preventDefault(); e.stopPropagation(); pick(MOUSE[e.button] || null); };
+    const noMenu = (e) => e.preventDefault();
+    capturing = {stop};
+    document.addEventListener("keydown", onKey, true); document.addEventListener("mousedown", onMouse, true);
+    document.addEventListener("contextmenu", noMenu, true);
+  };
+  return b;
+}
+
+function slider({label, help, min, max, step, unit, value, def, onSave, fmt}) {
+  const show = (v) => (fmt ? fmt(v) : v) + (unit ? " " + unit : "");
+  const val = el("span", {class: "val"}, show(value));
+  const inp = el("input", {type: "range", min, max, step, value});
+  inp.oninput = () => { dragging = true; val.textContent = show(parseFloat(inp.value)); };
+  inp.onchange = () => { dragging = false; onSave(parseFloat(inp.value)); };
+  const reset = el("button", {title: "Back to the default (" + show(def) + ")", style: "padding:0 6px", disabled: value === def, onclick: () => onSave(def)}, "↺");
+  return el("div", {class: "slider"}, el("div", {class: "top"}, el("label", {style: "font-size:13px"}, label),
+    el("span", {class: "row", style: "gap:6px"}, val, reset)), inp, el("div", {class: "note"}, help));
+}
+
+// ── render ──────────────────────────────────────────────────────────────────
+const busy = () => capturing || dragging || document.activeElement === $("char");
+
+function renderStatic() {
+  const m = S.macro, h = S.hotkeys;
+  $("kTrigger").replaceChildren(keyButton(m.trigger, (k) => save("macro", {trigger: k})));
+  $("kMacro").replaceChildren(keyButton(m.macro_key, (k) => save("macro", {macro_key: k})));
+  $("kAttack").replaceChildren(keyButton(m.attack_key, (k) => save("macro", {attack_key: k})));
+  $("kToggle").replaceChildren(keyButton(m.toggle_key, (k) => save("macro", {toggle_key: k})));
+  for (const b of $("attackMode").children) { b.classList.toggle("sel", b.dataset.mode === m.attack_mode);
+    b.onclick = () => save("macro", {attack_mode: b.dataset.mode}); }
+  $("attackNote").textContent = {hold: "Held the whole time you hold the trigger, so the macro cancels its swing on every hit. This is the cancel-weave: the reason this helper exists. Recommended.",
+    tap: "Tapped on an interval instead. Use this only if your macro needs the key to itself. Lower = more mana, but the macro gets fewer turns.",
+    off: "The helper only holds the macro key."}[m.attack_mode];
+  const sl = [];
+  if (m.attack_mode === "tap") {
+    sl.push(slider({label: "Tap the basic attack every", help: "Raise it if your macro skills slip.", min: 0.2, max: 5, step: 0.1, unit: "s",
+      value: m.attack_interval, def: 0.6, fmt: (v) => v.toFixed(1), onSave: (v) => save("macro", {attack_interval: v})}));
+    sl.push(slider({label: "Key press length", help: "How long each tap holds the key down. Raise it if the game misses taps.", min: 15, max: 150, step: 5, unit: "ms",
+      value: m.tap_hold_ms, def: 40, onSave: (v) => save("macro", {tap_hold_ms: v})}));
+  }
+  sl.push(slider({label: "Start delay", help: "Wait this long after you press the trigger before holding anything, so a quick right-click to turn the camera doesn't fire the macro. 0 = at once.",
+    min: 0, max: 500, step: 10, unit: "ms", value: m.start_delay_ms, def: 0, onSave: (v) => save("macro", {start_delay_ms: v})}));
+  $("sliders").replaceChildren(...sl);
+  for (const [id, name] of [["hMap", "map"], ["hCalibrate", "calibrate"], ["hRadar", "radar"], ["hArrow", "arrow"]]) {
+    const clear = el("button", {class: "danger", style: "padding:2px 8px", title: "No hotkey", disabled: !h[name], onclick: () => save("hotkeys", {[name]: ""})}, "×");
+    $(id).replaceChildren(keyButton(h[name], (k) => save("hotkeys", {[name]: k})), clear);
+  }
+  if (document.activeElement !== $("char")) $("char").value = S.overlay_settings.char || "";
+  $("sound").checked = !!S.overlay_settings.alert_sound;
+}
+
+function pill(id, text, cls) { const p = $(id); p.textContent = text; p.className = "pill " + (cls || ""); }
+
+function renderLive() {
+  const ms = S.macro_status, o = S.overlay;
+  $("ver").textContent = "v" + S.version;
+  for (const e of document.querySelectorAll(".linux-only")) e.style.display = S.platform === "linux" ? "" : "none";
+  // macro
+  let mtext = "stopped", mcls = "";
+  if (ms.running) { mtext = !ms.enabled ? "paused (on/off key)" : ms.active ? (ms.dry_run ? "test run: playing" : "playing") : (ms.dry_run ? "test run: ready" : "ready");
+    mcls = !ms.enabled ? "warn" : "ok"; }
+  else if (ms.error) { mtext = "stopped: " + ms.error; mcls = "bad"; }
+  pill("pMacro", "macro: " + mtext, mcls);
+  $("macroState").textContent = ms.running ? "hold " + prettyKey(S.macro.trigger) + " to play" : "";
+  $("mStart").disabled = ms.running && !ms.dry_run; $("mTest").disabled = ms.running && ms.dry_run; $("mStop").disabled = !ms.running;
+  // overlay
+  const ocls = !o.enabled ? "" : o.error ? "bad" : o.player ? "ok" : "warn";
+  pill("pOverlay", "overlay: " + (!o.enabled ? "off" : o.player ? o.cubes + " cube" + (o.cubes === 1 ? "" : "s") : (o.capturing ? "waiting" : "not capturing")), ocls);
+  $("ovState").textContent = o.enabled ? o.status : "";
+  $("ovState").style.color = o.error ? "var(--bad)" : "";
+  const t = $("ovToggle"); t.textContent = o.enabled ? "Turn overlay off" : "Turn overlay on"; t.className = o.enabled ? "" : "primary";
+  pill("sPos", o.player ? "position: " + o.player.map((v) => Math.round(v / 100)).join(", ") + " m" : (o.packets ? "position: use a skill or dash" : "position: –"), o.player ? "ok" : "");
+  pill("sCubes", "cubes: " + (o.enabled ? o.cubes : "–")); pill("sPk", "packets: " + (o.enabled ? o.packets : "–"));
+  pill("sFacing", "facing: " + (o.facing_known ? "known" : "move to learn it"));
+  for (const [id, on, label] of [["bRadar", o.radar_visible, "Radar"], ["bArrow", o.arrow_visible, "Arrow"], ["bMap", o.map_visible, "Map layer"]]) {
+    $(id).textContent = label + (on ? ": shown" : ": hidden"); $(id).className = on ? "on" : ""; $(id).disabled = !o.enabled; }
+  $("bArrow").textContent = o.arrow_visible ? "Arrow: on (pops up within " + Math.round(o.arrow_range_m) + " m)" : "Arrow: off";
+  $("bArrowMode").textContent = "Arrow follows: " + (o.arrow_mode === "heading" ? "your movement" : "map-up"); $("bArrowMode").disabled = !o.enabled;
+  $("bCal").textContent = o.calibrating ? "Save calibration" : "Calibrate now"; $("bCal").disabled = !o.enabled;
+  $("calInfo").textContent = (o.calibration_points ? o.calibration_points + " point(s) saved, " : "not calibrated yet, ") + o.map_mode + " mode";
+  $("parser").disabled = S.parser.fetching; $("parserNote").textContent = S.parser.fetching ? "downloading…" : S.parser.present ? "downloaded" : "not downloaded yet";
+  // banners
+  const b = [];
+  if (S.input_problem) b.push(el("div", {class: "banner bad"}, el("b", {}, "The macro can't press keys yet: "), S.input_problem));
+  if (!S.parser.present && !S.parser.fetching) b.push(el("div", {class: "banner"}, el("b", {}, "The cube parser is not downloaded. "),
+    "The overlay needs it. ", el("button", {class: "primary", onclick: () => run(() => api("/api/parser/update", {}))}, "Download it")));
+  if (S.platform === "windows" && o.error && /Npcap/i.test(o.status)) b.push(el("div", {class: "banner bad"},
+    el("b", {}, "The overlay needs Npcap. "), "Install it from ", el("a", {href: S.npcap_url, target: "_blank", rel: "noopener"}, "npcap.com"),
+    " with the default options, then ", el("button", {onclick: () => overlayCmd("restart-capture")}, "try again")));
+  for (const n of S.notes) b.push(el("div", {class: "banner", style: "border-color:var(--line)"}, "First run: " + n + "."));
+  $("banners").replaceChildren(...b);
+  const lg = $("log"), atEnd = lg.scrollTop + lg.clientHeight >= lg.scrollHeight - 4;
+  lg.textContent = S.log.join("\n"); if (atEnd) lg.scrollTop = lg.scrollHeight;
+  $("paths").textContent = "Settings: " + S.config_path;
+}
+
+let lastStatic = "";
+async function refresh(force) {
+  try { S = await api("/api/state"); } catch (e) { pill("pMacro", "the program is not running", "bad"); return; }
+  const key = JSON.stringify([S.macro, S.hotkeys, S.overlay_settings]);
+  if ((force || key !== lastStatic) && !busy()) { renderStatic(); lastStatic = key; }
+  renderLive();
+}
+
+$("mStart").onclick = () => run(() => api("/api/macro/start", {dry_run: false}), "macro started");
+$("mTest").onclick = () => run(() => api("/api/macro/start", {dry_run: true}), "test run: watch the log");
+$("mStop").onclick = () => run(() => api("/api/macro/stop", {}));
+$("ovToggle").onclick = () => save("overlay", {enabled: !S.overlay.enabled});
+$("bRadar").onclick = () => overlayCmd("radar"); $("bArrow").onclick = () => overlayCmd("arrow");
+$("bMap").onclick = () => overlayCmd("map"); $("bArrowMode").onclick = () => overlayCmd("arrow-mode");
+$("bCal").onclick = () => overlayCmd("calibrate");
+$("bCalReset").onclick = () => { if (confirm("Clear the saved calibration points? You will need to click your arrow again.")) overlayCmd("calibrate-reset"); };
+$("charSave").onclick = () => save("overlay", {char: $("char").value});
+$("char").onkeydown = (e) => { if (e.key === "Enter") { $("char").blur(); save("overlay", {char: $("char").value}); } };
+$("sound").onchange = () => save("overlay", {alert_sound: $("sound").checked});
+$("parser").onclick = () => run(() => api("/api/parser/update", {}));
+$("quit").onclick = async () => { if (!confirm("Quit AION 2 Helper? The macro and the overlay stop.")) return;
+  try { await api("/api/quit", {}); } catch (e) {}
+  document.body.replaceChildren(el("main", {}, el("div", {class: "card"}, el("h2", {}, "AION 2 Helper has quit."), el("p", {class: "note"}, "You can close this tab.")))); clearInterval(timer); };
+refresh(true);
+const timer = setInterval(() => refresh(false), 1000);
+</script>
+</body>
+</html>
