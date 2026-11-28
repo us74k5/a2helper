@@ -217,6 +217,7 @@ class Model(QObject):
         # PositionTracker drops (0,0,0) and other entities' readings and smooths facing.
         self.tracker = PositionTracker()
         self.raw_player = None
+        self.pid = None
 
     @property
     def heading(self):
@@ -227,6 +228,10 @@ class Model(QObject):
         return self.tracker.heading_time
 
     def on_snapshot(self, msg):
+        if msg.get("pid") != self.pid:
+            # the capture changed its mind about which character is you: start the track over
+            self.pid = msg.get("pid")
+            self.tracker = PositionTracker()
         self.raw_player = tuple(msg["player"]) if msg.get("player") else None
         self.tracker.update(self.raw_player)
         self.player = self.tracker.pos

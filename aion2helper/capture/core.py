@@ -4,7 +4,8 @@ This file is also installed root-owned next to the Linux capture helper, which i
 after it has dropped root. It never sends or changes any traffic.
 
 Snapshots are dicts:
-  {"t":"snap","player":[x,y,z] | None,"cubes":[[eid,npc_id,x,y,z,name],...],"pkts":n,"mv":n}
+  {"t":"snap","player":[x,y,z] | None,"cubes":[[eid,npc_id,x,y,z,name],...],"pkts":n,"mv":n,"pid":n}
+  ("pid": the entity ID taken to be you; a change means earlier positions were someone else's)
   ("mv": how many movement packets your client has sent; the overlay estimates walking from it)
   {"t":"info","msg":"..."}   {"t":"error","msg":"..."}
 """
@@ -85,6 +86,118 @@ def iter_pcap(path: str):
                 yield ip
 
 
+def read_varint(data: bytes, at: int = 0):
+    """(value, next offset) for the game's unsigned varint."""
+    value = shift = 0
+    while at < len(data) and shift < 35:
+        byte = data[at]
+        at += 1
+        value |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return value, at
+        shift += 7
+    raise ValueError("invalid varint")
+
+
+def iter_frames(payload: bytes):
+    """Complete game frames (opcode + body) in one TCP payload."""
+    at = 0
+    while at < len(payload):
+        try:
+            encoded, body_at = read_varint(payload, at)
+        except ValueError:
+            return
+        body_len = encoded - 4
+        if body_len < 2 or body_at + body_len > len(payload):
+            return
+        yield payload[body_at:body_at + body_len]
+        at = body_at + body_len
+
+
+OP_OWN_LIST = 0x3633        # server -> you: the effects on YOUR character (sent after a map load)
+OP_MAP_LOAD = 0x3621        # server: a new map is loading; entity IDs start over
+OP_ACTION = frozenset(range(14096, 14161)) | {14378, 14379, 14380, 14340}  # an entity moved or acted
+OP_SKILL_REQ = 0x3800       # you -> server: use a skill
+OP_TARGET_REQ = 0x3833      # you -> server: select a target
+VOTE_WINDOW_S = 0.6         # the server's answer to your skill arrives within this
+VOTE_ROUNDS = 8             # judge from your last few skill presses
+VOTE_MIN = 4                # ...needing at least this many
+VOTE_WIN = 0.75             # you show up after at least this share of them
+VOTE_RUNNER_UP = 0.5        # and nobody else after more than this share
+
+
+class SelfFinder:
+    """Works out which entity is your character without being told its name.
+
+    * The server sends your own effect list on every map load: that names you outright.
+    * Starting mid-game, it's learned from your skill presses: the entity that acts right after
+      most of them is you. Your selected target is left out, and if anything else keeps pace
+      with you, nothing is decided (a wrong lock is worse than none).
+    """
+
+    def __init__(self, clock=time.monotonic):
+        self.clock = clock
+        self.own = None             # entity ID from your own effect list
+        self.voted = None           # entity ID from your skill presses
+        self.target = None
+        self._window = None         # (opened at, entities seen since)
+        self._rounds = []
+
+    @property
+    def entity(self):
+        return self.own or self.voted
+
+    def on_c2s(self, body: bytes) -> None:
+        if len(body) < 3:
+            return
+        op = body[0] | body[1] << 8
+        now = self.clock()
+        if op == OP_TARGET_REQ:
+            try:
+                self.target = read_varint(body, 3)[0] or None
+            except ValueError:
+                pass
+        elif op == OP_SKILL_REQ:
+            self._close_window()
+            self._window = (now, set())
+
+    def on_s2c(self, body: bytes) -> None:
+        if len(body) < 3:
+            return
+        op = body[0] | body[1] << 8
+        try:
+            eid = read_varint(body, 2)[0]
+        except ValueError:
+            return
+        if op == OP_MAP_LOAD:
+            self.own = self.voted = self.target = self._window = None
+            self._rounds.clear()
+        elif op == OP_OWN_LIST and eid > 100:
+            self.own = eid
+        elif op in OP_ACTION and eid > 100 and self._window is not None:
+            if self.clock() - self._window[0] > VOTE_WINDOW_S:
+                self._close_window()
+            elif eid != self.target:
+                self._window[1].add(eid)
+
+    def _close_window(self):
+        if self._window is None:
+            return
+        self._rounds.append(self._window[1])
+        self._window = None
+        del self._rounds[:-VOTE_ROUNDS]
+        if len(self._rounds) < VOTE_MIN:
+            return
+        counts = {}
+        for seen in self._rounds:
+            for eid in seen:
+                counts[eid] = counts.get(eid, 0) + 1
+        ranked = sorted(counts.values(), reverse=True) + [0, 0]
+        n = len(self._rounds)
+        if ranked[0] >= VOTE_WIN * n and ranked[1] <= VOTE_RUNNER_UP * n:
+            self.voted = max(counts, key=counts.get)
+
+
 def load_parser(parser_dir: str):
     """Import the upstream Aion2CubeGPS parser without its Windows/Tk dependencies."""
     # It imports tkinter, psutil and scapy at the top but only uses them in its own window and
@@ -126,6 +239,17 @@ class Session:
         self.state.target_char_name = char.strip()
         self.engine = war.PureStreamEngine(self.state)
         self.state.on_update_callback = self.mark
+        # Without a character name the parser guesses which entity is you and can latch onto
+        # someone else; SelfFinder works it out and pins the parser to it.
+        self.finder = SelfFinder()
+        orig = getattr(self.engine, "handle_frame", None)
+        if orig is not None:
+            def handle_frame(body, *a, **k):
+                before = getattr(self.state, "player_entity_id", None)
+                self.finder.on_s2c(body)
+                orig(body, *a, **k)
+                self._pin_self(before)
+            self.engine.handle_frame = handle_frame   # the parser's nested calls go through here too
         self.pkts = 0
         self.min_dt = 1.0 / max_hz
         self.last_sent = 0.0
@@ -145,10 +269,29 @@ class Session:
             return
         with self.feed_lock:
             self.pkts += 1
+            if dport in self.ports:
+                for body in iter_frames(payload):
+                    self.finder.on_c2s(body)
             try:
                 self.engine.feed_payload(src, sport, dst, dport, payload)
             except Exception:
                 pass
+
+    def _pin_self(self, before) -> None:
+        eid = self.finder.entity
+        st = self.state
+        if eid is None:
+            return
+        if getattr(st, "player_entity_id", None) != eid or not getattr(st, "player_id_locked", True):
+            # your own effect list beats everything; a vote doesn't override a name lock
+            if self.finder.own != eid and getattr(st, "player_id_locked", False):
+                return
+            st.set_player_id(eid, lock=True, force=True)
+            self.dirty = True
+        if before is not None and before != eid:
+            with st.lock:
+                st.player_pos = None    # that was someone else's position
+            self.dirty = True
 
     def maybe_send(self, force: bool = False) -> None:
         now = time.monotonic()
@@ -159,7 +302,9 @@ class Session:
             cubes = [[c.entity_id, c.npc_id, round(c.x, 1), round(c.y, 1), round(c.z, 1), c.name]
                      for c in self.state.cubes.values()]
             moves = getattr(self.state, "c2s_step_count", None)
-        payload = {"t": "snap", "player": [round(v, 1) for v in pos] if pos else None, "cubes": cubes}
+            pid = getattr(self.state, "player_entity_id", None)
+        payload = {"t": "snap", "player": [round(v, 1) for v in pos] if pos else None, "cubes": cubes,
+                   "pid": pid}
         if moves is not None:
             payload["mv"] = moves   # your client's movement packets: the overlay estimates walking from them
         key = json.dumps(payload, sort_keys=True)
